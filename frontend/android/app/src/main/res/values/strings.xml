@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">WorkSync</string>
+    <string name="title_activity_main">WorkSync</string>
+    <string name="package_name">com.vybog.worksync</string>
+    <string name="custom_url_scheme">com.vybog.worksync</string>
+</resources>
