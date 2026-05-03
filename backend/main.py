@@ -16,6 +16,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
 class ReportRequest(BaseModel):
     report_message: str
 
@@ -31,18 +35,18 @@ def run_script(script_name, args=[]):
         raise e
 
 @app.post("/api/login")
-def login_trigger(background_tasks: BackgroundTasks):
+def login_trigger(request: LoginRequest, background_tasks: BackgroundTasks):
     try:
         # We run the script in the background to avoid blocking the HTTP response
-        background_tasks.add_task(run_script, "app.py")
+        background_tasks.add_task(run_script, "app.py", ["-u", request.username, "-p", request.password])
         return {"status": "success", "message": "Login sequence initiated"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/logout")
-def logout_trigger(background_tasks: BackgroundTasks):
+def logout_trigger(request: LoginRequest, background_tasks: BackgroundTasks):
     # This assumes you create a logout.py similar to app.py
-    # background_tasks.add_task(run_script, "logout.py")
+    # background_tasks.add_task(run_script, "logout.py", ["-u", request.username, "-p", request.password])
     return {"status": "success", "message": "Logout sequence initiated"}
 
 @app.post("/api/report")

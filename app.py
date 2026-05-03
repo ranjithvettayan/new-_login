@@ -13,10 +13,17 @@ chrome_options.add_argument("--disable-dev-shm-usage")
 browser = webdriver.Chrome(options=chrome_options)
 # browser = webdriver.Chrome()
 
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-u", "--username", help="Login Username", required=True)
+parser.add_argument("-p", "--password", help="Login Password", required=True)
+args = parser.parse_args()
+
 frequency = 1
 
-login_id = "ranjith.ravichandhiran"
-pass_wd = "Ranrsr30#"
+login_id = args.username
+pass_wd = args.password
 
 wait = WebDriverWait(browser, 10)
 
