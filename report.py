@@ -16,7 +16,9 @@ report_message = args.report
 
 # Setup
 chrome_options = Options()
-# chrome_options.add_argument("--headless")  # Optional headless mode
+chrome_options.add_argument("--headless=new")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
 browser = webdriver.Chrome(options=chrome_options)
 wait = WebDriverWait(browser, 15)
 actions = ActionChains(browser)
