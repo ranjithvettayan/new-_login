@@ -24,12 +24,12 @@ class ReportRequest(BaseModel):
     report_message: str
 
 def run_script(script_name, args=[]):
-    """Helper to run a selenium script from the parent directory."""
-    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    script_path = os.path.join(parent_dir, script_name)
+    """Helper to run a selenium script from the same directory."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_path = os.path.join(script_dir, script_name)
     try:
         command = [sys.executable, script_path] + args
-        subprocess.run(command, check=True, cwd=parent_dir)
+        subprocess.run(command, check=True, cwd=script_dir)
     except subprocess.CalledProcessError as e:
         print(f"Error running {script_name}: {e}")
         raise e
