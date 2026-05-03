@@ -71,7 +71,8 @@ const App = () => {
 
   const checkBackendHealth = async () => {
     try {
-      const res = await fetch(`${settings.backendUrl}/api/health`);
+      const baseUrl = settings.backendUrl.replace(/\/$/, '');
+      const res = await fetch(`${baseUrl}/api/health`);
       setIsBackendOnline(res.ok);
     } catch (err) {
       setIsBackendOnline(false);
@@ -200,7 +201,8 @@ const App = () => {
 
     setStatusMessage('Logging in...');
     try {
-      await fetch(`${settings.backendUrl}/api/login`, { method: 'POST' });
+      const baseUrl = settings.backendUrl.replace(/\/$/, '');
+      await fetch(`${baseUrl}/api/login`, { method: 'POST' });
       const now = new Date();
       setLoginTime(now);
       setIsLoggedIn(true);
@@ -216,7 +218,8 @@ const App = () => {
   const handleLogout = async (auto = false) => {
     setStatusMessage(auto ? 'Auto-logging out...' : 'Logging out...');
     try {
-      await fetch(`${settings.backendUrl}/api/logout`, { method: 'POST' });
+      const baseUrl = settings.backendUrl.replace(/\/$/, '');
+      await fetch(`${baseUrl}/api/logout`, { method: 'POST' });
       setIsLoggedIn(false);
       setLoginTime(null);
       setShowLogoutReminder(false);
@@ -238,7 +241,8 @@ const App = () => {
   const submitReport = async (text) => {
     setStatusMessage('Submitting report...');
     try {
-      await fetch(`${settings.backendUrl}/api/report`, {
+      const baseUrl = settings.backendUrl.replace(/\/$/, '');
+      await fetch(`${baseUrl}/api/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ report_message: text })
@@ -257,6 +261,24 @@ const App = () => {
       ? settings.activeDays.filter(d => d !== day)
       : [...settings.activeDays, day];
     setSettings({...settings, activeDays: updated});
+  };
+
+  const triggerTestNotification = async () => {
+    try {
+      await LocalNotifications.schedule({
+        notifications: [{
+          title: "TEST: WorkSync Daily Login",
+          body: "This is a test notification. Try clicking the buttons!",
+          id: 99,
+          schedule: { at: new Date(Date.now() + 5000) }, // 5 seconds from now
+          actionTypeId: 'LOGIN_ACTIONS'
+        }]
+      });
+      setStatusMessage('Test notification scheduled in 5 seconds. Please close the app to see it.');
+      setTimeout(() => setStatusMessage(''), 5000);
+    } catch (e) {
+      console.log('Error testing notification', e);
+    }
   };
 
   return (
@@ -343,13 +365,20 @@ const App = () => {
               ))}
             </div>
 
-            <button className="btn btn-primary" style={{ marginTop: '2rem' }} onClick={() => setSettingsOpen(false)}>Save Settings</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2rem' }}>
+              <button className="btn" style={{ width: '48%', backgroundColor: '#6c757d' }} onClick={triggerTestNotification}>
+                Test Notification
+              </button>
+              <button className="btn btn-primary" style={{ width: '48%', margin: 0 }} onClick={() => setSettingsOpen(false)}>
+                Save Settings
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Login Prompt Modal */}
-      {showLoginPrompt && !isLoggedIn && !settingsOpen && (
+      {showLoginPrompt && !isLoggedIn && !settingsOpen && isBackendOnline && (
         <div className="overlay">
           <div className="modal">
             <h2 style={{ textAlign: 'center' }}>Good Morning!</h2>
