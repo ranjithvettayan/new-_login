@@ -62,6 +62,7 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('worksync_settings', JSON.stringify(settings));
     setupOfflineCron(); // Reschedule with new times
+    checkBackendHealth(); // Re-check health immediately when URL changes
   }, [settings]);
 
   // Logout checking loop
@@ -203,11 +204,12 @@ const App = () => {
 
     setStatusMessage('Logging in...');
     try {
-      const baseUrl = settings.backendUrl.replace(/\/$/, '');
+      const freshSettings = JSON.parse(localStorage.getItem('worksync_settings')) || settings;
+      const baseUrl = freshSettings.backendUrl.replace(/\/$/, '');
       await fetch(`${baseUrl}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: settings.username, password: settings.password })
+        body: JSON.stringify({ username: freshSettings.username, password: freshSettings.password })
       });
       const now = new Date();
       setLoginTime(now);
@@ -224,11 +226,12 @@ const App = () => {
   const handleLogout = async (auto = false) => {
     setStatusMessage(auto ? 'Auto-logging out...' : 'Logging out...');
     try {
-      const baseUrl = settings.backendUrl.replace(/\/$/, '');
+      const freshSettings = JSON.parse(localStorage.getItem('worksync_settings')) || settings;
+      const baseUrl = freshSettings.backendUrl.replace(/\/$/, '');
       await fetch(`${baseUrl}/api/logout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: settings.username, password: settings.password })
+        body: JSON.stringify({ username: freshSettings.username, password: freshSettings.password })
       });
       setIsLoggedIn(false);
       setLoginTime(null);
@@ -251,7 +254,8 @@ const App = () => {
   const submitReport = async (text) => {
     setStatusMessage('Submitting report...');
     try {
-      const baseUrl = settings.backendUrl.replace(/\/$/, '');
+      const freshSettings = JSON.parse(localStorage.getItem('worksync_settings')) || settings;
+      const baseUrl = freshSettings.backendUrl.replace(/\/$/, '');
       await fetch(`${baseUrl}/api/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
