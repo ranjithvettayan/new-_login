@@ -3,97 +3,40 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import './index.css';
 
 const App = () => {
+  // Session State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginTime, setLoginTime] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
+  const [isHoliday, setIsHoliday] = useState(false);
   
-  // Modals & UI State
+  // Settings State
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState({
+    loginReminderTime: '09:00',
+    weekdayLogoutHours: 9,
+    saturdayLogoutHours: 4,
+    backendUrl: 'https://your-backend.onrender.com', // To be updated by user
+    activeDays: [1, 2, 3, 4, 5, 6], // Monday to Saturday
+  });
+  
+  // UI State
   const [showLoginPrompt, setShowLoginPrompt] = useState(true);
   const [showLogoutReminder, setShowLogoutReminder] = useState(false);
   const [showReportPrompt, setShowReportPrompt] = useState(false);
   
-  // Settings & Timers
-  const [reminderCount, setReminderCount] = useState(0);
+  // Forms & Timers
   const [reportText, setReportText] = useState('');
-  const [savedReports, setSavedReports] = useState(['Completed daily tasks', 'Working on new feature', 'Fixed bugs in the backend']);
-  const [isHoliday, setIsHoliday] = useState(false);
-  
-  // PWA & Connectivity
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [showNativeInstall, setShowNativeInstall] = useState(false);
-  const [showManualInstall, setShowManualInstall] = useState(false);
-  const [installDismissed, setInstallDismissed] = useState(false);
+  const [savedReports] = useState(['Completed daily tasks', 'Working on new feature', 'Fixed bugs in the backend']);
   const [isBackendOnline, setIsBackendOnline] = useState(true);
+  const [reminderCount, setReminderCount] = useState(0);
 
   const timerRef = useRef(null);
   const healthCheckRef = useRef(null);
 
-  // Constants
-  const NINE_HOURS = 9 * 60 * 60 * 1000;
-  const FOUR_HOURS = 4 * 60 * 60 * 1000;
-  const REMINDER_INTERVAL = 5 * 60 * 1000; // 5 minutes
-
-  // Detect mobile platform
-  const getDevicePlatform = () => {
-    const ua = navigator.userAgent || '';
-    if (/iPad|iPhone|iPod/.test(ua)) return 'ios';
-    if (/android/i.test(ua)) return 'android';
-    return 'desktop';
-  };
-
-  const isStandalone = () => {
-    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-  };
-
-  const setupOfflineCron = async () => {
-    try {
-      let permStatus = await LocalNotifications.checkPermissions();
-      if (permStatus.display !== 'granted') {
-        permStatus = await LocalNotifications.requestPermissions();
-      }
-
-      if (permStatus.display === 'granted') {
-        // Clear any existing crons
-        await LocalNotifications.cancel({ notifications: [{ id: 1 }] });
-        
-        // Schedule new daily reminder for 9 AM
-        await LocalNotifications.schedule({
-          notifications: [
-            {
-              title: "WorkSync Daily Reminder",
-              body: "Don't forget to log in for the day!",
-              id: 1,
-              schedule: { on: { hour: 9, minute: 0 } },
-              sound: null,
-              attachments: null,
-              actionTypeId: "",
-              extra: null
-            }
-          ]
-        });
-      }
-    } catch (e) {
-      console.log('LocalNotifications not available in browser mode');
-    }
-  };
-
+  // Load state on mount
   useEffect(() => {
-    // Schedule the offline daily cron
-    setupOfflineCron();
-
-    // Native PWA Install Prompt (works on HTTPS / localhost)
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setShowNativeInstall(true);
-    });
-
-    // If on mobile, not installed, and no native prompt — show manual instructions
-    const dismissed = localStorage.getItem('installDismissed');
-    const platform = getDevicePlatform();
-    if (platform !== 'desktop' && !isStandalone() && !dismissed) {
-      setTimeout(() => setShowManualInstall(true), 2000);
-    }
+    const storedSettings = localStorage.getItem('worksync_settings');
+    if (storedSettings) setSettings(JSON.parse(storedSettings));
 
     const storedLogin = localStorage.getItem('loginTime');
     if (storedLogin) {
@@ -102,71 +45,143 @@ const App = () => {
       setShowLoginPrompt(false);
     }
     
-    // Initial health check
     checkBackendHealth();
+    healthCheckRef.current = setInterval(checkBackendHealth, 30000);
 
-    // Health check loop
-    healthCheckRef.current = setInterval(() => {
-      checkBackendHealth();
-    }, 15000); // Check every 15 seconds
+    setupNotifications();
 
-    return () => clearInterval(healthCheckRef.current);
+    return () => {
+      clearInterval(healthCheckRef.current);
+      LocalNotifications.removeAllListeners();
+    };
   }, []);
+
+  // Sync settings changes
+  useEffect(() => {
+    localStorage.setItem('worksync_settings', JSON.stringify(settings));
+    setupOfflineCron(); // Reschedule with new times
+  }, [settings]);
+
+  // Logout checking loop
+  useEffect(() => {
+    if (!isLoggedIn || !loginTime) return;
+    timerRef.current = setInterval(checkLogoutCondition, 60000);
+    return () => clearInterval(timerRef.current);
+  }, [isLoggedIn, loginTime, reminderCount, settings]);
 
   const checkBackendHealth = async () => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/api/health`);
-      if (res.ok) {
-        setIsBackendOnline(true);
-      } else {
-        setIsBackendOnline(false);
-      }
+      const res = await fetch(`${settings.backendUrl}/api/health`);
+      setIsBackendOnline(res.ok);
     } catch (err) {
       setIsBackendOnline(false);
     }
   };
 
-  useEffect(() => {
-    if (!isLoggedIn || !loginTime) return;
+  const setupNotifications = async () => {
+    try {
+      let perm = await LocalNotifications.checkPermissions();
+      if (perm.display !== 'granted') await LocalNotifications.requestPermissions();
 
-    timerRef.current = setInterval(() => {
-      checkLogoutCondition();
-    }, 60000);
+      // Register Action Buttons for Notifications
+      await LocalNotifications.registerActionTypes({
+        types: [
+          {
+            id: 'LOGIN_ACTIONS',
+            actions: [
+              { id: 'login', title: 'Login Now', foreground: true },
+              { id: 'holiday', title: 'Mark as Holiday', foreground: true },
+              { id: 'snooze', title: 'Snooze 5m', foreground: false }
+            ]
+          },
+          {
+            id: 'LOGOUT_ACTIONS',
+            actions: [
+              { id: 'logout', title: 'Logout Now', foreground: true },
+              { id: 'snooze_out', title: 'Snooze 5m', foreground: false }
+            ]
+          }
+        ]
+      });
 
-    return () => clearInterval(timerRef.current);
-  }, [isLoggedIn, loginTime, reminderCount]);
+      // Listen for button clicks inside notifications!
+      LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction) => {
+        const actionId = notificationAction.actionId;
+        if (actionId === 'holiday') handleLogin('holiday');
+        if (actionId === 'login') handleLogin('now');
+        if (actionId === 'snooze') scheduleSnooze('login');
+        
+        if (actionId === 'logout') handleLogout(false);
+        if (actionId === 'snooze_out') scheduleSnooze('logout');
+      });
 
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-      setShowNativeInstall(false);
+    } catch (e) {
+      console.log('Notifications not supported here');
     }
   };
 
-  const dismissManualInstall = () => {
-    setShowManualInstall(false);
-    setInstallDismissed(true);
-    localStorage.setItem('installDismissed', 'true');
+  const setupOfflineCron = async () => {
+    try {
+      await LocalNotifications.cancel({ notifications: [{ id: 1 }] });
+      
+      const [hour, minute] = settings.loginReminderTime.split(':').map(Number);
+      
+      // Schedule only for active days
+      if (settings.activeDays.includes(new Date().getDay())) {
+        await LocalNotifications.schedule({
+          notifications: [{
+            title: "WorkSync Daily Login",
+            body: "Time to log in for the day! What would you like to do?",
+            id: 1,
+            schedule: { on: { hour, minute } },
+            actionTypeId: 'LOGIN_ACTIONS',
+            sound: null,
+            attachments: null,
+            extra: null
+          }]
+        });
+      }
+    } catch (e) { }
+  };
+
+  const scheduleSnooze = async (type) => {
+    try {
+      const snoozeId = type === 'login' ? 2 : 3;
+      await LocalNotifications.schedule({
+        notifications: [{
+          title: type === 'login' ? "Snoozed: WorkSync Login" : "Snoozed: WorkSync Logout",
+          body: "5 minute reminder!",
+          id: snoozeId,
+          schedule: { at: new Date(Date.now() + 5 * 60000) }, // 5 mins from now
+          actionTypeId: type === 'login' ? 'LOGIN_ACTIONS' : 'LOGOUT_ACTIONS',
+        }]
+      });
+    } catch (e) { }
   };
 
   const checkLogoutCondition = () => {
     const now = new Date();
-    const dayOfWeek = now.getDay();
-    const elapsed = now.getTime() - new Date(loginTime).getTime();
+    const day = now.getDay();
+    if (!settings.activeDays.includes(day)) return;
 
-    if (dayOfWeek === 0) return; // Sunday
+    const elapsedMs = now.getTime() - new Date(loginTime).getTime();
+    const targetHours = day === 6 ? settings.saturdayLogoutHours : settings.weekdayLogoutHours;
+    const targetMs = targetHours * 60 * 60 * 1000;
 
-    let targetDuration = NINE_HOURS;
-    if (dayOfWeek === 6) targetDuration = FOUR_HOURS; // Saturday
-
-    if (elapsed >= targetDuration) {
+    if (elapsedMs >= targetMs) {
       if (reminderCount < 2) {
         setShowLogoutReminder(true);
+        // Trigger local notification to ring the phone
+        LocalNotifications.schedule({
+          notifications: [{
+            title: "Time to Log Out!",
+            body: `You have completed ${targetHours} hours.`,
+            id: 10,
+            actionTypeId: 'LOGOUT_ACTIONS'
+          }]
+        });
       } else {
-        handleLogout(true);
+        handleLogout(true); // Auto logout after 2 ignores
       }
     }
   };
@@ -177,16 +192,15 @@ const App = () => {
       setShowLoginPrompt(false);
       return;
     }
-    
     if (mode === 'later') {
       setShowLoginPrompt(false);
-      setTimeout(() => setShowLoginPrompt(true), 30 * 60 * 1000);
+      scheduleSnooze('login');
       return;
     }
 
     setStatusMessage('Logging in...');
     try {
-      await fetch(`http://${window.location.hostname}:8000/api/login`, { method: 'POST' });
+      await fetch(`${settings.backendUrl}/api/login`, { method: 'POST' });
       const now = new Date();
       setLoginTime(now);
       setIsLoggedIn(true);
@@ -202,7 +216,7 @@ const App = () => {
   const handleLogout = async (auto = false) => {
     setStatusMessage(auto ? 'Auto-logging out...' : 'Logging out...');
     try {
-      await fetch(`http://${window.location.hostname}:8000/api/logout`, { method: 'POST' });
+      await fetch(`${settings.backendUrl}/api/logout`, { method: 'POST' });
       setIsLoggedIn(false);
       setLoginTime(null);
       setShowLogoutReminder(false);
@@ -218,15 +232,13 @@ const App = () => {
   const ignoreLogoutReminder = () => {
     setReminderCount(prev => prev + 1);
     setShowLogoutReminder(false);
-    setTimeout(() => {
-      checkLogoutCondition();
-    }, REMINDER_INTERVAL);
+    scheduleSnooze('logout');
   };
 
   const submitReport = async (text) => {
     setStatusMessage('Submitting report...');
     try {
-      await fetch(`http://${window.location.hostname}:8000/api/report`, {
+      await fetch(`${settings.backendUrl}/api/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ report_message: text })
@@ -240,83 +252,46 @@ const App = () => {
     }
   };
 
+  const toggleDay = (day) => {
+    const updated = settings.activeDays.includes(day)
+      ? settings.activeDays.filter(d => d !== day)
+      : [...settings.activeDays, day];
+    setSettings({...settings, activeDays: updated});
+  };
+
   return (
     <div className="app-container">
-      {/* Offline Banner */}
       {!isBackendOnline && (
-        <div style={{
-          backgroundColor: 'var(--danger)',
-          color: 'white',
-          padding: '0.75rem',
-          textAlign: 'center',
-          fontWeight: 'bold',
-          borderBottomLeftRadius: '8px',
-          borderBottomRightRadius: '8px',
-          marginBottom: '1rem',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          animation: 'slideUp 0.3s ease-out reverse'
-        }}>
-          ⚠️ Backend is Offline. Cannot connect to server.
+        <div style={{ backgroundColor: 'var(--danger)', color: 'white', padding: '0.75rem', textAlign: 'center', fontWeight: 'bold' }}>
+          ⚠️ Backend Offline. Update URL in Settings.
         </div>
       )}
 
-      {/* Native PWA Install Banner (HTTPS/localhost) */}
-      {showNativeInstall && (
-        <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--primary-color)' }}>
-          <div>
-            <h3 style={{ margin: 0 }}>📲 Install WorkSync</h3>
-            <p style={{ fontSize: '0.875rem', opacity: 0.9 }}>Add to home screen for quick access.</p>
-          </div>
-          <button className="btn" style={{ width: 'auto', marginBottom: 0, backgroundColor: 'white', color: 'var(--primary-color)' }} onClick={handleInstallClick}>
-            Install App
-          </button>
-        </div>
-      )}
-
-      {/* Manual Install Instructions (HTTP over IP) */}
-      {showManualInstall && !showNativeInstall && !installDismissed && (
-        <div className="card" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <h3 style={{ margin: '0 0 0.5rem 0' }}>📲 Install as App</h3>
-            <button onClick={dismissManualInstall} style={{ background: 'none', border: 'none', color: 'white', fontSize: '1.25rem', cursor: 'pointer', padding: 0 }}>✕</button>
-          </div>
-          {getDevicePlatform() === 'ios' ? (
-            <p style={{ fontSize: '0.875rem', lineHeight: 1.6 }}>
-              Tap the <strong>Share</strong> button (📤) at the bottom of Safari, then tap <strong>"Add to Home Screen"</strong>.
-            </p>
-          ) : (
-            <p style={{ fontSize: '0.875rem', lineHeight: 1.6 }}>
-              Tap the <strong>⋮ menu</strong> (top-right in Chrome), then tap <strong>"Add to Home screen"</strong> or <strong>"Install app"</strong>.
-            </p>
-          )}
-        </div>
-      )}
-
-      <header style={{ textAlign: 'center', marginBottom: '2rem' }}>
-        <h1>WorkSync Pro</h1>
-        {statusMessage && (
-          <div className="card pulse" style={{ padding: '0.75rem', backgroundColor: 'var(--primary-color)' }}>
-            {statusMessage}
-          </div>
-        )}
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', marginTop: '1rem' }}>
+        <h1 style={{ margin: 0 }}>WorkSync</h1>
+        <button className="btn" style={{ width: 'auto', marginBottom: 0, padding: '0.5rem' }} onClick={() => setSettingsOpen(true)}>
+          ⚙️
+        </button>
       </header>
 
+      {statusMessage && (
+        <div className="card pulse" style={{ padding: '0.75rem', backgroundColor: 'var(--primary-color)' }}>
+          {statusMessage}
+        </div>
+      )}
+
+      {/* Main Dashboard */}
       {!isLoggedIn && !isHoliday && !showLoginPrompt && (
         <div className="card flex-center">
-          <h2>Ready to start your day?</h2>
-          <button className="btn btn-primary" onClick={() => setShowLoginPrompt(true)}>
-            Show Login Options
-          </button>
+          <h2>Ready to start?</h2>
+          <button className="btn btn-primary" onClick={() => setShowLoginPrompt(true)}>Show Login Options</button>
         </div>
       )}
 
       {isHoliday && (
         <div className="card flex-center">
           <h2>Enjoy your Holiday! 🌴</h2>
-          <p style={{ color: 'var(--text-muted)' }}>No tracking today.</p>
-          <button className="btn" style={{ marginTop: '1rem' }} onClick={() => setIsHoliday(false)}>
-            Cancel Holiday Mode
-          </button>
+          <button className="btn" onClick={() => setIsHoliday(false)}>Cancel Holiday Mode</button>
         </div>
       )}
 
@@ -324,101 +299,94 @@ const App = () => {
         <>
           <div className="card">
             <h2>Active Session</h2>
-            <p>Logged in since: <strong>{new Date(loginTime).toLocaleTimeString()}</strong></p>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '0.5rem' }}>
-              Day rule: {new Date().getDay() === 0 ? 'Sunday (Manual)' : new Date().getDay() === 6 ? 'Saturday (4 hrs)' : 'Weekday (9 hrs)'}
-            </p>
+            <p>Started: <strong>{new Date(loginTime).toLocaleTimeString()}</strong></p>
           </div>
-
           <div className="card">
-            <h2>Actions</h2>
-            <button className="btn btn-primary" onClick={() => setShowReportPrompt(true)} disabled={!isBackendOnline}>
-              Submit Daily Report
-            </button>
-            <button className="btn btn-danger" onClick={() => handleLogout(false)} disabled={!isBackendOnline}>
-              Manual Logout
-            </button>
+            <button className="btn btn-primary" onClick={() => setShowReportPrompt(true)} disabled={!isBackendOnline}>Submit Report</button>
+            <button className="btn btn-danger" onClick={() => handleLogout(false)} disabled={!isBackendOnline}>Manual Logout</button>
           </div>
         </>
       )}
 
-      {showLoginPrompt && !isLoggedIn && (
+      {/* Settings Modal */}
+      {settingsOpen && (
+        <div className="overlay" style={{ alignItems: 'flex-start', paddingTop: '2rem' }}>
+          <div className="modal" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <h2>Settings</h2>
+              <button onClick={() => setSettingsOpen(false)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '1.2rem' }}>✕</button>
+            </div>
+            
+            <label style={{ display: 'block', margin: '1rem 0 0.5rem' }}>Cloud Backend URL:</label>
+            <input type="text" value={settings.backendUrl} onChange={e => setSettings({...settings, backendUrl: e.target.value})} placeholder="https://your-app.onrender.com" />
+
+            <label style={{ display: 'block', margin: '1rem 0 0.5rem' }}>Daily Login Reminder Time:</label>
+            <input type="time" value={settings.loginReminderTime} onChange={e => setSettings({...settings, loginReminderTime: e.target.value})} />
+
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', margin: '1rem 0 0.5rem', fontSize: '0.9rem' }}>Weekday Target (Hrs):</label>
+                <input type="number" min="1" max="24" value={settings.weekdayLogoutHours} onChange={e => setSettings({...settings, weekdayLogoutHours: Number(e.target.value)})} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', margin: '1rem 0 0.5rem', fontSize: '0.9rem' }}>Saturday Target (Hrs):</label>
+                <input type="number" min="1" max="24" value={settings.saturdayLogoutHours} onChange={e => setSettings({...settings, saturdayLogoutHours: Number(e.target.value)})} />
+              </div>
+            </div>
+
+            <label style={{ display: 'block', margin: '1rem 0 0.5rem' }}>Active Working Days:</label>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
+                <button key={i} onClick={() => toggleDay(i)} className="btn" style={{ width: 'auto', padding: '0.5rem', backgroundColor: settings.activeDays.includes(i) ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)' }}>
+                  {d}
+                </button>
+              ))}
+            </div>
+
+            <button className="btn btn-primary" style={{ marginTop: '2rem' }} onClick={() => setSettingsOpen(false)}>Save Settings</button>
+          </div>
+        </div>
+      )}
+
+      {/* Login Prompt Modal */}
+      {showLoginPrompt && !isLoggedIn && !settingsOpen && (
         <div className="overlay">
           <div className="modal">
             <h2 style={{ textAlign: 'center' }}>Good Morning!</h2>
-            <p style={{ textAlign: 'center', marginBottom: '1.5rem', color: 'var(--text-muted)' }}>
-              Please select your login status for today.
-            </p>
-            <button className="btn btn-success" onClick={() => handleLogin('now')} disabled={!isBackendOnline}>
-              Login Now
-            </button>
-            <button className="btn" onClick={() => handleLogin('holiday')}>
-              Today is a Holiday
-            </button>
-            <button className="btn" onClick={() => handleLogin('later')}>
-              Remind me Later
-            </button>
+            <button className="btn btn-success" onClick={() => handleLogin('now')} disabled={!isBackendOnline}>Login Now</button>
+            <button className="btn" onClick={() => handleLogin('holiday')}>Today is a Holiday</button>
+            <button className="btn" onClick={() => handleLogin('later')}>Snooze 5 mins</button>
           </div>
         </div>
       )}
 
-      {showLogoutReminder && (
+      {/* Logout Reminder Modal */}
+      {showLogoutReminder && !settingsOpen && (
         <div className="overlay">
           <div className="modal">
             <h2 style={{ color: 'var(--warning)', textAlign: 'center' }}>Time to Log Out!</h2>
-            <p style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-              You've reached your scheduled hours for today. (Reminder {reminderCount + 1}/2)
-            </p>
-            <button className="btn btn-primary" onClick={() => setShowReportPrompt(true)} disabled={!isBackendOnline}>
-              Write Report & Logout
-            </button>
-            <button className="btn btn-danger" onClick={() => handleLogout(false)} disabled={!isBackendOnline}>
-              Logout Now
-            </button>
-            <button className="btn" onClick={ignoreLogoutReminder}>
-              Remind me in 5 mins
-            </button>
+            <p style={{ textAlign: 'center' }}>Reminder {reminderCount + 1}/2</p>
+            <button className="btn btn-primary" onClick={() => setShowReportPrompt(true)} disabled={!isBackendOnline}>Write Report & Logout</button>
+            <button className="btn btn-danger" onClick={() => handleLogout(false)} disabled={!isBackendOnline}>Logout Now</button>
+            <button className="btn" onClick={ignoreLogoutReminder}>Snooze 5 mins</button>
           </div>
         </div>
       )}
 
-      {showReportPrompt && (
+      {/* Report Modal */}
+      {showReportPrompt && !settingsOpen && (
         <div className="overlay">
-          <div className="modal" style={{ maxWidth: '500px' }}>
+          <div className="modal">
             <h2>Submit Report</h2>
-            
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem' }}>Use Existing Report:</label>
-              <select onChange={(e) => {
-                if(e.target.value) submitReport(e.target.value);
-              }} defaultValue="">
-                <option value="" disabled>Select a saved report...</option>
-                {savedReports.map((r, i) => (
-                  <option key={i} value={r}>{r}</option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ textAlign: 'center', margin: '1rem 0', color: 'var(--text-muted)' }}>— OR —</div>
-
-            <textarea 
-              rows="4" 
-              placeholder="Write a new report..."
-              value={reportText}
-              onChange={(e) => setReportText(e.target.value)}
-            ></textarea>
-            
+            <select onChange={(e) => e.target.value && submitReport(e.target.value)} defaultValue="">
+              <option value="" disabled>Select saved report...</option>
+              {savedReports.map((r, i) => <option key={i} value={r}>{r}</option>)}
+            </select>
+            <div style={{ textAlign: 'center', margin: '1rem 0' }}>— OR —</div>
+            <textarea rows="4" placeholder="Write a new report..." value={reportText} onChange={(e) => setReportText(e.target.value)}></textarea>
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-              <button 
-                className="btn btn-primary" 
-                onClick={() => submitReport(reportText)}
-                disabled={!reportText.trim() || !isBackendOnline}
-              >
-                Submit
-              </button>
-              <button className="btn" onClick={() => setShowReportPrompt(false)}>
-                Do it Later
-              </button>
+              <button className="btn btn-primary" onClick={() => submitReport(reportText)} disabled={!reportText.trim() || !isBackendOnline}>Submit</button>
+              <button className="btn" onClick={() => setShowReportPrompt(false)}>Do it Later</button>
             </div>
           </div>
         </div>
