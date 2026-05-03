@@ -16,6 +16,8 @@ const App = () => {
     weekdayLogoutHours: 9,
     saturdayLogoutHours: 4,
     backendUrl: 'https://your-backend.onrender.com', // To be updated by user
+    username: '',
+    password: '',
     activeDays: [1, 2, 3, 4, 5, 6], // Monday to Saturday
   });
   
@@ -202,7 +204,11 @@ const App = () => {
     setStatusMessage('Logging in...');
     try {
       const baseUrl = settings.backendUrl.replace(/\/$/, '');
-      await fetch(`${baseUrl}/api/login`, { method: 'POST' });
+      await fetch(`${baseUrl}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: settings.username, password: settings.password })
+      });
       const now = new Date();
       setLoginTime(now);
       setIsLoggedIn(true);
@@ -219,7 +225,11 @@ const App = () => {
     setStatusMessage(auto ? 'Auto-logging out...' : 'Logging out...');
     try {
       const baseUrl = settings.backendUrl.replace(/\/$/, '');
-      await fetch(`${baseUrl}/api/logout`, { method: 'POST' });
+      await fetch(`${baseUrl}/api/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: settings.username, password: settings.password })
+      });
       setIsLoggedIn(false);
       setLoginTime(null);
       setShowLogoutReminder(false);
@@ -341,6 +351,17 @@ const App = () => {
             
             <label style={{ display: 'block', margin: '1rem 0 0.5rem' }}>Cloud Backend URL:</label>
             <input type="text" value={settings.backendUrl} onChange={e => setSettings({...settings, backendUrl: e.target.value})} placeholder="https://your-app.onrender.com" />
+
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', margin: '1rem 0 0.5rem', fontSize: '0.9rem' }}>Username:</label>
+                <input type="text" value={settings.username} onChange={e => setSettings({...settings, username: e.target.value})} placeholder="ranjith.ravichandhiran" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', margin: '1rem 0 0.5rem', fontSize: '0.9rem' }}>Password:</label>
+                <input type="password" value={settings.password} onChange={e => setSettings({...settings, password: e.target.value})} placeholder="Password" />
+              </div>
+            </div>
 
             <label style={{ display: 'block', margin: '1rem 0 0.5rem' }}>Daily Login Reminder Time:</label>
             <input type="time" value={settings.loginReminderTime} onChange={e => setSettings({...settings, loginReminderTime: e.target.value})} />
